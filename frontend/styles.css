@@ -69,3 +69,36 @@ h1 {
 .image-card img:hover {
     transform: scale(1.05);
 }
+
+.params {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+    margin-bottom: 16px;
+}
+
+.param {
+    display: flex;
+    flex-direction: column;
+    min-width: 120px;
+}
+
+.param label {
+    font-size: 0.85rem;
+    color: #333;
+}
+
+.param input,
+.param select {
+    padding: 6px;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+}
+
+.note {
+    text-align: center;
+    font-size: 0.9rem;
+    color: #666;
+    margin-bottom: 12px;
+}

@@ -6,40 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Image Enhancement</title>
     <link rel="stylesheet" href="/styles.css" />
-    <style>
-        /* nhỏ để hiển thị form param */
-        .params {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            justify-content: center;
-            margin-bottom: 16px;
-        }
-
-        .param {
-            display: flex;
-            flex-direction: column;
-            min-width: 120px;
-        }
-
-        .param label {
-            font-size: 0.85rem;
-            color: #333;
-        }
-
-        .param input {
-            padding: 6px;
-            border-radius: 6px;
-            border: 1px solid #ddd;
-        }
-
-        .note {
-            text-align: center;
-            font-size: 0.9rem;
-            color: #666;
-            margin-bottom: 12px;
-        }
-    </style>
 </head>
 
 <body>
@@ -49,27 +15,61 @@
         <form id="uploadForm" class="upload-form">
             <input type="file" id="imageInput" name="image" accept="image/*" required>
 
-
             <div style="text-align:center; margin-top:12px;">
                 <img id="previewImage"
                     style="max-width: 300px; display:none; border-radius:8px; border:1px solid #ccc;">
             </div>
+
             <div class="params">
                 <div class="param">
-                    <label>a (alpha)</label>
-                    <input type="number" step="0.01" id="alpha" name="alpha" value="0.5" />
+                    <label>Method</label>
+                    <select id="method" name="method">
+                        <option value="default">Original Method</option>
+                        <option value="bilateral">Bilateral Filter (OpenCV)</option>
+                        <option value="guided">Guided Filter (OpenCV)</option>
+                    </select>
                 </div>
-                <div class="param">
-                    <label>k (kernel radius)</label>
-                    <input type="number" step="1" id="kernel_radius" name="kernel_radius" value="15" />
+
+                <div id="originalParams">
+                    <div class="param">
+                        <label>a (alpha)</label>
+                        <input type="number" step="0.01" id="alpha" name="alpha" value="0.5" />
+                    </div>
+                    <div class="param">
+                        <label>k (kernel radius)</label>
+                        <input type="number" step="1" id="kernel_size" name="kernel_size" value="15" />
+                    </div>
+                    <div class="param">
+                        <label>iterations</label>
+                        <input type="number" step="1" id="iterations" name="iterations" value="5" />
+                    </div>
+                    <div class="param">
+                        <label>s (final_weight)</label>
+                        <input type="number" step="0.01" id="final_weight" name="final_weight" value="0.5" />
+                    </div>
                 </div>
-                <div class="param">
-                    <label>iterations</label>
-                    <input type="number" step="1" id="iterations" name="iterations" value="5" />
+
+                <div id="bilateralParams" style="display:none;">
+                    <div class="param">
+                        <label>σ_r (sigma_color)</label>
+                        <input type="number" step="0.1" id="sigma_color" name="sigma_color" value="25" />
+                    </div>
+                    <div class="param">
+                        <label>σ_d (sigma_space)</label>
+                        <input type="number" step="0.1" id="sigma_space" name="sigma_space" value="3" />
+                    </div>
                 </div>
-                <div class="param">
-                    <label>s (final_weight)</label>
-                    <input type="number" step="0.01" id="final_weight" name="final_weight" value="0.5" />
+
+
+                <div id="guidedParams" style="display:none;">
+                    <div class="param">
+                        <label>radius (r)</label>
+                        <input type="number" step="1" id="radius" name="radius" value="8" />
+                    </div>
+                    <div class="param">
+                        <label>eps</label>
+                        <input type="number" step="0.001" id="eps" name="eps" value="0.01" />
+                    </div>
                 </div>
             </div>
 
@@ -78,7 +78,7 @@
             </div>
         </form>
 
-        <div class="note">Ví dụ: a = 0.5, k = 5..7, s = 0.5. Hãy thử nghiệm với các giá trị khác nhau.</div>
+        <div class="note">Thử nghiệm các giá trị khác nhau cho từng phương pháp.</div>
 
         <div id="results" class="results-grid"></div>
     </div>
@@ -87,79 +87,73 @@
         const imageInput = document.getElementById("imageInput");
         const preview = document.getElementById("previewImage");
 
-        imageInput.addEventListener("change", function () {
-            const file = this.files[0];
+        imageInput.addEventListener("change", () => {
+            const file = imageInput.files[0];
             if (file) {
-                const url = URL.createObjectURL(file);
-                preview.src = url;
+                preview.src = URL.createObjectURL(file);
                 preview.style.display = "block";
             } else {
                 preview.src = "";
                 preview.style.display = "none";
             }
         });
-        const form = document.getElementById('uploadForm');
 
-        form.addEventListener('submit', async (e) => {
+        const methodSelect = document.getElementById("method");
+        const originalParams = document.getElementById("originalParams");
+        const bilateralParams = document.getElementById("bilateralParams");
+        const guidedParams = document.getElementById("guidedParams");
+
+        methodSelect.addEventListener("change", () => {
+            originalParams.style.display = methodSelect.value === "default" ? "flex" : "none";
+            bilateralParams.style.display = methodSelect.value === "bilateral" ? "flex" : "none";
+            guidedParams.style.display = methodSelect.value === "guided" ? "flex" : "none";
+        });
+
+        const form = document.getElementById("uploadForm");
+        form.addEventListener("submit", async (e) => {
             e.preventDefault();
-
-            const fileInput = document.getElementById('imageInput');
-            if (!fileInput.files.length) return alert('Chọn 1 file ảnh trước');
+            const fileInput = document.getElementById("imageInput");
+            if (!fileInput.files.length) return alert("Chọn 1 file ảnh trước.");
 
             const file = fileInput.files[0];
             const formData = new FormData();
-            formData.append('image', file);
+            formData.append("image", file);
 
-            // append param values
-            const fields = ['alpha', 'kernel_radius', 'iterations', 'final_weight'];
-            fields.forEach(f => {
-                const el = document.getElementById(f);
-                if (el && el.value !== '') formData.append(f, el.value);
-            });
+            const method = methodSelect.value;
+            formData.append("method", method);
 
-            // show a simple loading indicator
-            const resultsDiv = document.getElementById('results');
-            resultsDiv.innerHTML = '<p>Processing... please wait.</p>';
+            if (method === "bilateral") {
+                formData.append("sigma_color", document.getElementById("sigma_color").value);
+                formData.append("sigma_space", document.getElementById("sigma_space").value);
+            } else if (method === "guided") {
+                formData.append("radius", document.getElementById("radius").value);
+                formData.append("eps", document.getElementById("eps").value);
+            } else {
+                ["alpha", "kernel_radius", "iterations", "final_weight"].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el && el.value !== "") formData.append(id, el.value);
+                });
+            }
+
+            const resultsDiv = document.getElementById("results");
+            resultsDiv.innerHTML = "<p>Processing... please wait.</p>";
 
             try {
-                const res = await fetch("http://127.0.0.1:5000/upload", {
-                    method: "POST",
-                    body: formData
-                });
-
+                const res = await fetch("http://127.0.0.1:5000/upload", { method: "POST", body: formData });
                 if (!res.ok) {
-                    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+                    const err = await res.json().catch(() => ({ error: "Unknown error" }));
                     resultsDiv.innerHTML = `<p style="color:red">Error: ${err.error || res.statusText}</p>`;
                     return;
                 }
 
                 const data = await res.json();
-                console.log(data);
-                let html = `
-                    <div class="image-card">
-                        <h3>Original</h3>
-                        <img src="${URL.createObjectURL(file)}" alt="Original Image">
-                    </div>
-                `;
-
-                const orderedSteps = ["mask", "diff", "Im", "final", "result"];
-
-                orderedSteps.forEach(step => {
-                    if (data.steps[step]) {
-                        const filename = data.steps[step];
-                        html += `
-                            <div class="image-card">
-                                <h3>${step}</h3>
-                                <img src="http://127.0.0.1:5000/image/${filename}">
-                            </div>
-                        `;
-                    }
+                let html = `<div class="image-card"><h3>Original</h3><img src="${URL.createObjectURL(file)}"></div>`;
+                Object.entries(data.steps).forEach(([step, filename]) => {
+                    html += `<div class="image-card"><h3>${step}</h3><img src="http://127.0.0.1:5000/image/${filename}"></div>`;
                 });
-
-                html += `<div style="grid-column: 1 / -1; text-align:center; margin-top:8px;">
+                html += `<div style="grid-column:1/-1;text-align:center;margin-top:8px;">
                             <small>Params used: ${JSON.stringify(data.params_used)}</small>
                          </div>`;
-
                 resultsDiv.innerHTML = html;
             } catch (err) {
                 resultsDiv.innerHTML = `<p style="color:red">Network error or server down: ${err.message}</p>`;
