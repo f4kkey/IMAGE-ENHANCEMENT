@@ -3,6 +3,7 @@ from enhancer import run_enhancement
 from enhancer2 import run_bilateral_enhancement  
 from enhancer3 import run_guided_filter 
 from flask_cors import CORS
+from PIL import Image
 import os
 import uuid
 
@@ -79,6 +80,58 @@ def upload():
 @app.route('/image/<filename>')
 def serve_image(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
+
+@app.route('/upload_all', methods=['POST'])
+def upload_all():
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image provided'}), 400
+
+    img = request.files['image']
+    img_id = str(uuid.uuid4())
+    input_filename = f"{img_id}_input.png"
+    input_path = os.path.join(UPLOAD_FOLDER, input_filename)
+    img.save(input_path)
+
+    # ---- Run all enhancement methods ----
+    out_default = run_enhancement(input_path, img_id + "_d")
+    out_bilateral = run_bilateral_enhancement(input_path, img_id + "_b")
+    out_guided = run_guided_filter(input_path, img_id + "_g")
+
+    # Lấy đúng ảnh output cuối của mỗi method
+    img_original = Image.open(input_path).convert("L")
+    img_default = Image.open(os.path.join(UPLOAD_FOLDER, out_default["result"]))
+    img_bilateral = Image.open(os.path.join(UPLOAD_FOLDER, out_bilateral["bilateral"]))
+    img_guided = Image.open(os.path.join(UPLOAD_FOLDER, out_guided["guided"]))
+
+    # ---- Resize tất cả ảnh cùng chiều cao ----
+    h = max(img_original.height, img_default.height, img_bilateral.height, img_guided.height)
+
+    def resize_h(img):
+        scale = h / img.height
+        return img.resize((int(img.width * scale), h))
+
+    img_original = resize_h(img_original)
+    img_default = resize_h(img_default)
+    img_bilateral = resize_h(img_bilateral)
+    img_guided = resize_h(img_guided)
+
+    # ---- GHÉP 4 ảnh cạnh nhau ----
+    total_w = img_original.width + img_default.width + img_bilateral.width + img_guided.width
+    merged = Image.new("L", (total_w, h))
+    
+    x = 0
+    for im in [img_original, img_default, img_bilateral, img_guided]:
+        merged.paste(im, (x, 0))
+        x += im.width
+
+    merged_name = f"{img_id}_merged.png"
+    merged_path = os.path.join(UPLOAD_FOLDER, merged_name)
+    merged.save(merged_path)
+
+    # ---- Trả về filename duy nhất ----
+    return jsonify({
+        "merged": merged_name
+    })
 
 if __name__ == '__main__':
     app.run(debug=True)

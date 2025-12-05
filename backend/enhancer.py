@@ -1,42 +1,72 @@
+import os
+import cv2
 import numpy as np
 from PIL import Image
-import os
 
 BASE_DIR = os.path.dirname(__file__)
 UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-def cluster_filter(image, alpha=0.5, kernel_size=15):
 
-    I = image.astype(np.float32)
-    dist = np.zeros((kernel_size, kernel_size), dtype=np.float32)
-    for x in range(kernel_size):
-        for y in range(kernel_size):
-            dist[x, y] = np.sqrt((x - kernel_size//2)**2 + (y - kernel_size//2)**2)
-    w = np.exp(-alpha * dist)
+def clustering_filter(img, alpha=0.5, radius=7, num_inner_iter=3):
+    H, W = img.shape
+    out = np.zeros_like(img, dtype=np.float32)
 
-    padded = np.pad(I, (kernel_size // 2,kernel_size // 2), mode='edge')
-    res = np.zeros(I.shape, dtype=np.float32)
-    
-    for i in range(res.shape[0]):
-        for j in range(res.shape[1]):
+    ys, xs = np.mgrid[-radius:radius + 1, -radius:radius + 1]
+    spatial_w = np.exp(-alpha * (xs**2 + ys**2)).astype(np.float32)
 
-            patch = padded[i:i+kernel_size, j:j+kernel_size].copy()
+    for y in range(H):
+        y0 = max(0, y - radius)
+        y1 = min(H, y + radius + 1)
+        ky0 = y0 - (y - radius)
+        ky1 = ky0 + (y1 - y0)
 
-            y_bar = np.sum(w * patch) / np.sum(w)
+        for x in range(W):
+            x0 = max(0, x - radius)
+            x1 = min(W, x + radius + 1)
+            kx0 = x0 - (x - radius)
+            kx1 = kx0 + (x1 - x0)
 
-            sigma2 = np.sum(w * (patch - y_bar)**2) / np.sum(w)
+            patch = img[y0:y1, x0:x1]
+            w_spatial = spatial_w[ky0:ky1, kx0:kx1]
 
-            p = 1.0 / (2 * sigma2 + 1e-8)
+            sum_w = np.sum(w_spatial)
+            if sum_w <= 0:
+                out[y, x] = img[y, x]
+                continue
 
-            similarity = np.exp(-p * (patch - padded[i + kernel_size // 2, j + kernel_size // 2])**2)
+            y_bar = np.sum(patch * w_spatial) / sum_w
+            var_y = np.sum((patch - y_bar)**2 * w_spatial) / sum_w
+            var_y = max(var_y, 1e-8) 
 
-            numerator = np.sum((w * similarity) * patch)
-            denominator = np.sum(w * similarity)
+            p = 1.0 / (2.0 * var_y)
 
-            res[i, j] = numerator / (denominator + 1e-8)
-            
-    return res
+            y_curr = y_bar
+            for _ in range(num_inner_iter):
+                w_range = np.exp(-p * (patch - y_curr)**2).astype(np.float32)
+                w_total = w_spatial * w_range
+
+                sum_wt = np.sum(w_total)
+                if sum_wt <= 1e-12:
+                    break
+
+                y_next = np.sum(patch * w_total) / sum_wt
+
+                if abs(y_next - y_curr) < 1e-4:
+                    y_curr = y_next
+                    break
+                y_curr = y_next
+
+            out[y, x] = y_curr
+
+    return out
+
+
+def edge_preserving_smoothing(img, iterations=5, alpha=0.5, radius=7):
+    out = img.copy()
+    for _ in range(iterations):
+        out = clustering_filter(out, alpha=alpha, radius=radius, num_inner_iter=3)
+    return out
 
 
 def run_enhancement(
@@ -50,66 +80,79 @@ def run_enhancement(
     ):
 
     img = Image.open(input_path).convert("L")
-    I = np.array(img, dtype=np.float32)
+    I_uint8 = np.array(img, dtype=np.uint8)
+    I = I_uint8.astype(np.float32) / 255.0  # [0,1]
 
     step_paths = {}
 
     # Step 1:
-    I_i = I.copy()
-    for _ in range(k):
-        print(f"Enhancement iteration {_+1}/{k}")
-        I_i = cluster_filter(I_i, alpha, kernel_size)
-    I_i_img = Image.fromarray(np.clip(I_i, 0, 255).astype(np.uint8))
-    I_i_name = f"{img_id}_mask.png"
-    I_i_img.save(os.path.join(UPLOAD_DIR, I_i_name))
-    step_paths["mask"] = I_i_name
+    radius = kernel_size // 2
+    print(f"Edge-preserving smoothing: k={k}, alpha={alpha}, radius={radius}")
+    Ik = edge_preserving_smoothing(I, iterations=k, alpha=alpha, radius=radius)
+
+    Ik_show = np.clip(Ik * 255.0, 0, 255).astype(np.uint8)
+    mask_name = f"{img_id}_mask.png"
+    Image.fromarray(Ik_show).save(os.path.join(UPLOAD_DIR, mask_name))
+    step_paths["mask"] = mask_name
 
     # Step 2:
-    I_d = (I - I_i).copy()
+    Id = I - Ik
 
-    diff_img = Image.fromarray(np.clip(I_d, 0, 255).astype(np.uint8))
+    Id_min, Id_max = Id.min(), Id.max()
+    Id_norm = (Id - Id_min) / (Id_max - Id_min + 1e-8)
+    Id_show = np.clip(Id_norm * 255.0, 0, 255).astype(np.uint8)
     diff_name = f"{img_id}_diff.png"
-    diff_img.save(os.path.join(UPLOAD_DIR, diff_name))
+    Image.fromarray(Id_show).save(os.path.join(UPLOAD_DIR, diff_name))
     step_paths["diff"] = diff_name
 
     # Step 3:
-    from scipy.ndimage import uniform_filter
+    win_size = local_var_size
+    kernel = (win_size, win_size)
 
-    M = uniform_filter(I_d, size=local_var_size)
-    V = uniform_filter((I_d - M)**2, size=local_var_size)
+    Id_f32 = Id.astype(np.float32)
+    M = cv2.blur(Id_f32, kernel)       
+    Id2 = Id_f32 * Id_f32
+    M2 = cv2.blur(Id2, kernel)            
+    V = M2 - M * M                      
+    V = np.maximum(V, 1e-8)
 
-    # Step 4: 
+    # Step 4:
+    thresh_img = threshold * np.sqrt(V)
+    mask_condition = np.abs(Id_f32 - M) < thresh_img
 
-    cond = np.abs(I_d - M) > threshold * np.sqrt(V + 1e-8)
-    Im = np.where(cond, I, I_i)
+    Im = np.where(mask_condition, Ik, I)
 
-    Im_img = Image.fromarray(np.clip(Im, 0, 255).astype(np.uint8))
+    Im_show = np.clip(Im * 255.0, 0, 255).astype(np.uint8)
     Im_name = f"{img_id}_Im.png"
-    Im_img.save(os.path.join(UPLOAD_DIR, Im_name))
+    Image.fromarray(Im_show).save(os.path.join(UPLOAD_DIR, Im_name))
     step_paths["Im"] = Im_name
 
-    # Step 5: 
-    I_o = (I - final_weight * Im).copy()
-
-    final_img = Image.fromarray(np.clip(I_o, 0, 255).astype(np.uint8))
+    # Step 5:
+    s = final_weight
+    Ie = I - s * Im
+    
+    Ie_raw = np.clip(Ie, 0.0, 1.0)
+    Ie_raw_u8 = (Ie_raw * 255.0).astype(np.uint8)
     final_name = f"{img_id}_final.png"
-    final_img.save(os.path.join(UPLOAD_DIR, final_name))
+    Image.fromarray(Ie_raw_u8).save(os.path.join(UPLOAD_DIR, final_name))
     step_paths["final"] = final_name
 
     # Step 6: 
-    result = I_o.copy()
+    m = Ie.mean()
+    std = Ie.std()
 
-    first_ten = np.percentile(I_o, 0.5)
-    last_ten = np.percentile(I_o, 100 - 0.5)
-    result[result < first_ten] = first_ten
-    result[result > last_ten] = last_ten    
+    low = m - threshold * std
+    high = m + threshold * std
 
-    result = (result - result.min()) / (result.max() - result.min()) * 255
-    result = result.astype(np.uint8)
-    result_img = Image.fromarray(np.clip(result, 0, 255).astype(np.uint8))
+    if high <= low:
+        low, high = Ie.min(), Ie.max() + 1e-6
+
+    Ie_clipped = np.clip(Ie, low, high)
+    Ie_norm = (Ie_clipped - low) / (high - low + 1e-8)
+
+    result_u8 = np.clip(Ie_norm * 255.0, 0, 255).astype(np.uint8)
     result_name = f"{img_id}_result.png"
-    result_img.save(os.path.join(UPLOAD_DIR, result_name))
+    Image.fromarray(result_u8).save(os.path.join(UPLOAD_DIR, result_name))
     step_paths["result"] = result_name
+
     return step_paths
-
-

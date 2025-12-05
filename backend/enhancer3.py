@@ -7,13 +7,6 @@ UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def run_guided_filter(input_path, img_id, radius=8, eps=0.01):
-    """
-    Áp dụng guided filter OpenCV cho ảnh màu
-    input_path: path ảnh gốc
-    img_id: string id để lưu file
-    radius: bán kính r
-    eps: regularization epsilon
-    """
     img = cv2.imread(input_path)  
     guide = img.copy()
     src = img.copy()
