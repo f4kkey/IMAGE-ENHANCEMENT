@@ -81,7 +81,7 @@ def run_enhancement(
 
     img = Image.open(input_path).convert("L")
     I_uint8 = np.array(img, dtype=np.uint8)
-    I = I_uint8.astype(np.float32) / 255.0  # [0,1]
+    I = I_uint8.astype(np.float32) / 255.0 
 
     step_paths = {}
 
