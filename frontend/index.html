@@ -171,8 +171,9 @@
                 }
 
                 html += `<div style="grid-column:1/-1;text-align:center;margin-top:8px;">
-                        <small>Params used: ${JSON.stringify(data.params_used)}</small>
-                     </div>`;
+        <small><b>Params used:</b> ${JSON.stringify(data.params_used)}</small><br>
+        <small><b>Processing time:</b> ${(data.processing_time).toFixed(2)} ms</small>
+     </div>`;
 
                 resultsDiv.innerHTML = html;
             } catch (err) {

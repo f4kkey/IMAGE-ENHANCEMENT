@@ -6,6 +6,7 @@ from flask_cors import CORS
 from PIL import Image
 import os
 import uuid
+import time
 
 app = Flask(__name__, static_folder="../frontend", template_folder="../frontend")
 CORS(app)
@@ -46,7 +47,7 @@ def upload():
             return int(v) if v is not None else default
         except:
             return default
-
+    start_time = time.perf_counter()
     if method == "bilateral":
         sigma_color = _get_float("sigma_color", 25.0)
         sigma_space = _get_float("sigma_space", 3.0)
@@ -74,8 +75,9 @@ def upload():
         result_files = run_enhancement(input_path, img_id, **params)
         params_used = params
         params_used["method"] = "default"
-
-    return jsonify({'steps': result_files, 'params_used': params_used})
+    end_time = time.perf_counter()
+    print(f"Processing time: {end_time - start_time} seconds")
+    return jsonify({'steps': result_files, 'params_used': params_used, 'processing_time': end_time - start_time})
 
 @app.route('/image/<filename>')
 def serve_image(filename):
@@ -84,3 +86,4 @@ def serve_image(filename):
 
 if __name__ == '__main__':
     app.run(debug=True)
+    
