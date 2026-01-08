@@ -65,6 +65,7 @@ def clustering_filter(img, alpha=0.5, radius=7, num_inner_iter=3):
 def edge_preserving_smoothing(img, iterations=5, alpha=0.5, radius=7):
     out = img.copy()
     for _ in range(iterations):
+        print("iteration ", _ + 1)
         out = clustering_filter(out, alpha=alpha, radius=radius, num_inner_iter=3)
     return out
 
