@@ -40,10 +40,6 @@ def run_guided_filter(input_path, img_id, radius=8, eps=0.001):
 
     guide_f = guide.astype(np.float32) / 255.0
     src_f = src.astype(np.float32) / 255.0
-
-    if not hasattr(cv2, 'ximgproc') or not hasattr(cv2.ximgproc, 'guidedFilter'):
-        raise RuntimeError("OpenCV ximgproc module with guidedFilter is required")
-
     guided = guided_filter_gray(guide_f[:, :, 0], src_f[:, :, 0], radius, eps)
 
     out = np.clip(guided * 255.0, 0, 255).astype(np.uint8)
